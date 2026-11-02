@@ -1,0 +1,187 @@
+---
+title: "05_SP"
+author: "Samuele Antonello 162640"
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Concentrazione dell'indice S&P 500
+In questa data challenge andremo a studiare come è concentrato l'indice S&P 500 tra le compagnie che lo costituiscono (le 500 migliori compagnie negli Stati Uniti).
+
+Per prima cosa andiamo a scaricare le librerie che ci serviranno:
+```{r}
+library(tidyverse)
+library(ineq)
+library(tidyquant)
+```
+
+- *tidyverse* serve a manipolare e visualizzare i dati;
+- *tidyquant* serve a fornire i dati inerenti a S&P 500;
+- *ineq* fornisce degli strumenti statistici per misurare la concentrazione all'interno di una distribuzione.
+
+### Punto 1:
+*Quanto è diseguale la ponderazione delle società nell'S&P 500?*
+
+Procediamo a scariacare i dati aggiornati dell'indice e calcoliamo delle statistiche per misurare la disparità tra i pesi, per comodità creiamo una colonna chiamata *weight_pct* che indica il peso percentuale di una azienda rispetto al totale
+
+```{r}
+#scarichiamo i costituenti e i relativi pesi
+
+sp500 = tq_index("SP500")
+sp500 = sp500 |>
+  mutate(weight_pct = (weight * 100))
+head(sp500)
+
+```
+
+Per capire quanto sono diseguali i pesi confrontiamo la media (che viene molto influenzata dai valori estremi) con la mediana, osserviamo anche il minimo e il massimo:
+
+```{r}
+# Scarichiamo i dati e creiamo la colonna in percentuale
+
+sp500|>
+  summarise(
+    n_aziende = n(),
+    peso_medio = paste0(round(mean(weight_pct, na.rm = TRUE), 3), "%"),
+    peso_mediano = paste0(round(median(weight_pct, na.rm = TRUE), 3), "%"),
+    peso_min = paste0(round(min(weight_pct, na.rm = TRUE), 4), "%"),
+    peso_max = paste0(round(max(weight_pct, na.rm = TRUE), 2), "%"),
+    divario_max_min = round(max(weight_pct, na.rm = TRUE) / min(weight_pct, na.rm = TRUE), 0)
+  )
+```
+
+Con questi dati possiamo creare un grafico:
+
+```{r}
+# Calcoliamo i valori da tracciare sul grafico
+mean_val <- mean(sp500$weight_pct, na.rm = TRUE)
+median_val <- median(sp500$weight_pct, na.rm = TRUE)
+
+median_val
+mean_val
+# Grafico della densità con Media e Mediana in evidenza
+ggplot(sp500, aes(x = weight_pct)) +
+  geom_density(fill = "steelblue", alpha = 0.5) +
+  
+  # Linea verticale per la Mediana
+  geom_vline(xintercept = median_val, color = "firebrick", linetype = "dashed", linewidth = 1) +
+  
+  # Linea verticale per la Media
+  geom_vline(xintercept = mean_val, color = "darkgreen", linetype = "solid", linewidth = 1) +
+  
+  # Etichette di testo sul grafico
+  annotate("text", x = median_val + 0.15, y = 3, 
+           label = paste0("Mediana: ", round(median_val, 2), "%"), 
+           color = "firebrick", fontface = "bold", hjust = 0) +
+  annotate("text", x = mean_val + 0.15, y = 2.2, 
+           label = paste0("Media: ", round(mean_val, 2), "%"), 
+           color = "darkgreen", fontface = "bold", hjust = 0) +
+  
+  theme_minimal() +
+  labs(
+    title = "Distribuzione dei pesi delle aziende nell'S&P 500",
+    subtitle = "Forte asimmetria a destra: la Media (0.20%) supera di molto la Mediana (~0.08%)",
+    x = "Peso dell'azienda nell'indice (%)",
+    y = "Densità"
+  )
+```
+
+Notiamo che la distribuzione segue decisamente un modello a coda lunga con molte aziende che valgono molto meno di un punto percentuale e poche aziende che ne valgono di più.
+
+Osservando la *media* (0.2%) possiamo dire che questa è pesantemente influenzata dai "giganti" dell'economia, viene trascinata verso destra lasciando oltre il 70-75% delle aziende sotto di essa, la maggioranza delle società quindi ha un impatto individuale quasi irrilevante rispetto al valore complessivo dell'indice.
+La *mediana* invece ci dice che il 50% delle aziende dell'indice pesa meno dello 0.07% del totale.
+
+
+### Punto 2:
+*Quanto dell'indice è rappresentato dalle sue aziende più grandi?*
+
+Per capire quanto il mercato sia guidato da poche aziende "giganti" ordiniamo le società in ordine decrescente (di peso) e calcoliamo l'impatto cumulativo delle prime classificate, possiamo osservare top 5, top 10, top 20 e top 50 ad esempio.
+
+```{r}
+
+top_companies = function(N, df){
+  df|>
+    arrange(desc(weight_pct))|>
+    slice_head(n = N)|>
+    mutate(
+      Posizione = row_number(),
+      "Peso" = round(weight_pct, 2),
+      "Peso cumulato" = round(cumsum(weight_pct),2)
+    )|>
+    select(Posizione, symbol, company, "Peso", "Peso cumulato")
+}
+
+#top_5 = top_companies(5,sp500)
+
+for (x in c(5,10,20,50)) {
+  df = top_companies(x,sp500)
+  print(tail(df))
+}
+
+```
+
+Analizzando i dati sulla quota cumulativa delle aziende in cima al S&P 500 notiamo che la top 5 (1% delle aziende) controlla il 27.8% del totale, la top 10 il 38% mentre le prime 20 aziende detengono il 49.2%, risulta quindi che quasi la metà dei pesi dell'indice risiede nel 4% migliore delle aziende, confermando quindi la distribuziona a coda lunga vista nel punto 1.
+
+### Punto 3:
+
+*Che cosa ci dice la curva di Lorenz riguardo alla concentrazione?*
+
+La *Curva di Lorenz* mostra graficamente la relazione tra la percentuale cumulata di aziende (asse x) e la percentuale cumulata del peso totale dell'indice che esse detengono (asse y).
+
+Le coordinate verranno calcolate con la funzione `Lc()` del pacchetto *ineq* con le quali costruiremo un grafico:
+
+```{r}
+library(ineq)
+
+lorenz_obj = Lc(sp500$weight_pct)
+
+#conversione dei dati in un df per metterli su un grafico
+lorenz_df = tibble(
+  p = lorenz_obj$p,
+  L = lorenz_obj$L
+)
+
+ggplot(lorenz_df, aes(x = p, y = L)) +
+  geom_line(color = "red", linewidth = 1.2)+
+  geom_segment(aes(x = 0, y = 0, xend = 1, yend = 1), linetype = "dashed", color = "grey40") +
+  geom_ribbon(aes(ymin = L, ymax = p), fill = "firebrick", alpha = 0.15) +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  labs(
+    title = "Curva di Lorenz del peso delle aziende nell'S&P 500",
+    subtitle = "La marcata curvatura verso il basso evidenzia l'elevata concentrazione di mercato",
+    x = "Percentuale cumulata delle aziende (dal peso minore al maggiore)",
+    y = "Percentuale cumulata del peso dell'indice"
+)
+```
+
+In questo grafico la linea tratteggiata rappresenta l'ipotetico scenario di perfetta equidistribuzione (dove ciasucuna delle 500 aziende pesa 0.2%), tuttavia lo scenario reale è indicato dalla curva rossa, questa mostra che il 50% meno rilevante delle aziende (la prima metà dell'asse x) rappresenta meno del 5% del peso complessivo dell'indice, il 90% delle aziende accumula solo il 36.6% del peso totale.
+
+### Punto 4:
+
+*Qual'è il coefficiente di Gini dei pesi dell'S&P 500?*
+
+Il coefficiente di Gini sintetizza in un unico numero l'area di concentrazione compresa tra la linea di perfetta uguaglianza e la curva di Lorenz (la regione rosa che vediamo nel grafico precedente), questo valore è compreso tra 0 e 1:
+
+- *0* : Uguaglianza perfetta, quindi tutte le 500 aziende pesano esattamente lo 0.20% del totale;
+- *1* : Massima concentrazione, quindi un'unica azienda detiene il 100% del peso dell'indice.
+
+```{r}
+gini_value = ineq(sp500$weight_pct, type = "Gini")
+gini_pct = round(gini_value * 100, 2)
+
+gini_pct
+```
+Il coefficiente di Gini nel nostro caso vale in percentuale *71.5%*, il che ci conferma che la nostra distribuzione ha una altissima concentrazione.
+
+
+
+
+
